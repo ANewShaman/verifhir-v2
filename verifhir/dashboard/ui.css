@@ -1,0 +1,298 @@
+/* verifhir/dashboard/ui.css */
+/* d:\verifhir\verifhir-governance-layer\verifhir\dashboard\ui.css */
+
+/* ============================================
+   VeriFHIR Governance Console - Production CSS
+   Streamlit-Compatible | Dark Enterprise Theme
+   ============================================ */
+
+/* --- BASE THEME --- */
+/* Scope styles to app wrapper to avoid relying on Streamlit internal test IDs */
+.vf-app-root [data-testid="stAppViewContainer"] {
+    background: radial-gradient(ellipse at top, #0f172a 0%, #020617 100%);
+    color: #e2e8f0;
+}
+
+[data-testid="stHeader"] {
+    background: transparent;
+}
+
+/* --- SIDEBAR: WIDENED + NO GLASSMORPHISM --- */
+[data-testid="stSidebar"], .vf-sidebar {
+    background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    border-right: 1px solid rgba(255,255,255,0.06);
+    min-width: 320px;
+}
+
+/* Remove glassmorphism from sidebar blocks only */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
+    background: transparent !important;
+    border: none !important;
+    padding: 0.75rem 0 !important;
+    backdrop-filter: none !important;
+}
+
+/* --- TYPOGRAPHY --- */
+h1, h2, h3, h4, h5, h6 {
+    color: #f8fafc;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+}
+
+h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+h2 {
+    font-size: 1.5rem;
+    color: #cbd5e1;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+h3 {
+    font-size: 1.25rem;
+    color: #94a3b8;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+p, li, span {
+    color: #cbd5e1;
+    line-height: 1.6;
+}
+
+/* --- REMOVE CARD SPAM: Don't wrap everything --- */
+[data-testid="stVerticalBlock"] > div:not([data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div) {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+/* --- PRIMARY OUTPUT CONTAINER (Redaction Review) --- */
+.output-container {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 32px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    line-height: 1.9;
+    color: #cbd5e1;
+    min-height: 60vh;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+/* --- BUTTONS --- */
+button[kind="primary"] {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    padding: 0.625rem 1.25rem;
+    transition: opacity 0.2s;
+}
+
+button[kind="primary"]:hover {
+    opacity: 0.9;
+}
+
+button[kind="secondary"] {
+    background: rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    font-weight: 400;
+}
+
+/* --- INPUTS --- */
+input, textarea, select {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #e2e8f0 !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+}
+
+input:focus, textarea:focus, select:focus {
+    border-color: #0284c7 !important;
+    box-shadow: 0 0 0 1px #0284c7 !important;
+}
+
+/* --- REDACTION CHIPS --- */
+.redaction-chip {
+    background: rgba(59, 130, 246, 0.18);
+    color: #0369a1; /* increased contrast */
+    border: 1px solid rgba(3, 105, 161, 0.35);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+/* --- DIFF VIEW STYLING --- */
+.diff-original {
+    color: #b91c1c; /* higher contrast red */
+    text-decoration: line-through;
+    background: rgba(185, 28, 28, 0.12);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.diff-redacted {
+    background: rgba(59, 130, 246, 0.18);
+    color: #044e8c; /* deeper blue for contrast */
+    border: 1px solid rgba(4, 78, 140, 0.35);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.875rem;
+}
+
+/* --- COMPLIANCE BANNER --- */
+.compliance-banner {
+    background: rgba(15, 23, 42, 0.9);
+    border-left: 3px solid #0284c7;
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    margin-bottom: 1.5rem;
+}
+
+/* --- STATUS INDICATORS --- */
+.status-success {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.1);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
+.status-warning {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
+.status-error {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.1);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    border: 1px solid rgba(248, 113, 113, 0.2);
+}
+
+/* --- DIVIDERS --- */
+hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin: 1.5rem 0;
+}
+
+/* --- TABS --- */
+[data-baseweb="tab-list"] {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+[data-baseweb="tab"] {
+    color: #94a3b8;
+    font-weight: 400;
+}
+
+[aria-selected="true"] {
+    color: #60a5fa !important;
+    background: rgba(59, 130, 246, 0.15) !important;
+    border-radius: 4px;
+}
+
+/* --- SCROLLBARS --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* --- FORMS --- */
+[data-testid="stForm"] {
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+/* --- CAPTIONS --- */
+.caption, [data-testid="stCaptionContainer"] {
+    color: #64748b;
+    font-size: 0.875rem;
+}
+
+/* --- REMOVE STREAMLIT BRANDING --- */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+/* ===============================
+   TARGETED EVIDENCE WIDGET STYLES
+   =============================== */
+
+.evidence-widget {
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.evidence-header {
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: #cbd5e1;
+}
+
+.evidence-divider {
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 0.75rem 0 1rem 0;
+}
+
+.sub-widget {
+    background: rgba(15, 23, 42, 0.3);
+    border-left: 2px solid rgba(96, 165, 250, 0.3);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    border-radius: 4px;
+}
+
+.redaction-review-container {
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    white-space: pre-wrap;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    color: #cbd5e1;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
