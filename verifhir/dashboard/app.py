@@ -1206,7 +1206,7 @@ with tab1:
                             "remediation_method": "Deterministic Rules Engine" if suggested_redaction == processed_text else "Hybrid (Rules + AI)",
                             "is_authoritative": True,
                             "audit_metadata": {
-                                "purpose": purpose
+                                "purpose": purpose,
                                 "regulation": jurisdiction.governing_regulation or regulation,
                                 "country_code": data_subject_country,
                                 "rules_applied": [v.violation_type for v in raw_violations],
