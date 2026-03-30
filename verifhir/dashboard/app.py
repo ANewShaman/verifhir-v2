@@ -21,6 +21,14 @@ from verifhir.runtime.graceful_exit import (
     graceful_execution_context,
 )
 
+# ── CHANGE 1: New governance pipeline imports ──────────────────────────────
+from verifhir.jurisdiction.resolver import resolve_jurisdiction
+from verifhir.orchestrator.rule_engine import run_deterministic_rules
+from verifhir.decision.judge import DecisionEngine
+from verifhir.explainability.mapper import explain_violations
+from verifhir.assurance.generator import generate_negative_assertions
+from verifhir.audit.system_config import compute_system_config_hash as _compute_system_config_hash
+# ──────────────────────────────────────────────────────────────────────────
 
 # NEW: Import demo cases as single source of truth
 from verifhir.dashboard.demo_cases import demo_cases as REG_DEMO_CASES
@@ -68,14 +76,6 @@ with graceful_execution_context():
         engine._apply_country_overrides(country)
     except Exception:
         pass
-
-# Apply any environment/jurisdiction-specific overlays immediately after engine init
-try:
-    # Use environment override or default to US. Avoid referencing UI vars here.
-    country = os.environ.get("VERIFHIR_DEFAULT_COUNTRY", "US")
-    engine._apply_country_overrides(country)
-except Exception:
-    pass
 
 # --- REGULATION METADATA ---
 REGULATION_INFO = {
@@ -132,21 +132,21 @@ def get_demo_options_by_type(data_type, regulation):
     """
     Returns list of (display_name, case_key, regulation_key) tuples
     for the given data_type and regulation context.
-    
+
     data_type: 'text/json', 'hl7', 'docs'
     regulation: selected regulation from REGULATION_INFO
     """
     options = []
-    
+
     # FIXED: Use global REG_MAP for consistency
     reg_key = REG_MAP.get(regulation, "base_cases")
-    
+
     # FIXED: Add safety check for regulation existence
     if reg_key not in REG_DEMO_CASES:
         return options
-    
+
     reg_cases = REG_DEMO_CASES[reg_key]
-    
+
     # Map data types to case types in demo_cases.py
     if data_type == "text/json":
         # FIXED: Use .get() to prevent KeyError
@@ -179,17 +179,17 @@ def get_demo_options_by_type(data_type, regulation):
             options.append((f"{regulation} - German Discharge Note", "german_json", reg_key))
         if reg_cases.get("spanish_semi_structured"):
             options.append((f"{regulation} - Spanish Record", "spanish_semi_structured", reg_key))
-            
+
     elif data_type == "hl7":
         # Look for HL7 v2 messages
         if reg_cases.get("hl7_v2_adt"):
             options.append((f"{regulation} - HL7 v2 ADT Message", "hl7_v2_adt", reg_key))
-            
+
     elif data_type == "docs":
         # Look for OCR/document cases
         if reg_cases.get("ocr_style"):
             options.append((f"{regulation} - Scanned Document (OCR)", "ocr_style", reg_key))
-    
+
     return options
 
 # NEW: Helper function to extract text from demo case
@@ -200,7 +200,7 @@ def extract_demo_text(reg_key, case_key):
     """
     try:
         case_data = REG_DEMO_CASES[reg_key][case_key]
-        
+
         if isinstance(case_data, str):
             return case_data
         elif isinstance(case_data, dict):
@@ -235,8 +235,6 @@ def _extract_redacted_text(suggestion):
     return ""
 
 
-
-
 # --- HELPER: ENHANCED VISUAL DIFF GENERATOR ---
 def generate_diff_html(original, redacted):
     """
@@ -245,16 +243,14 @@ def generate_diff_html(original, redacted):
     - Redacted tags in clean blue chips
     - Better spacing and readability
     """
-
-    #Here changed
     if not isinstance(original, str):
         original = str(original or "")
     if not isinstance(redacted, str):
         redacted = str(redacted or "")
-    
+
     d = difflib.SequenceMatcher(None, original, redacted)
     html_parts = []
-    
+
     for tag, i1, i2, j1, j2 in d.get_opcodes():
         if tag == 'replace':
             orig_text = html.escape(original[i1:i2])
@@ -269,7 +265,7 @@ def generate_diff_html(original, redacted):
                 f'font-weight: 500;">'
                 f'{orig_text}</span>'
             )
-            
+
             redact_text = html.escape(redacted[j1:j2])
             html_parts.append(
                 f'<span style="'
@@ -285,7 +281,7 @@ def generate_diff_html(original, redacted):
                 f'font-size: 0.9em;">'
                 f'{redact_text}</span>'
             )
-        
+
         elif tag == 'delete':
             del_text = html.escape(original[i1:i2])
             html_parts.append(
@@ -298,7 +294,7 @@ def generate_diff_html(original, redacted):
                 f'font-weight: 500;">'
                 f'{del_text}</span>'
             )
-            
+
         elif tag == 'insert':
             ins_text = html.escape(redacted[j1:j2])
             html_parts.append(
@@ -315,21 +311,19 @@ def generate_diff_html(original, redacted):
                 f'font-size: 0.9em;">'
                 f'{ins_text}</span>'
             )
-            
+
         elif tag == 'equal':
             equal_text = html.escape(original[i1:i2])
             html_parts.append(equal_text)
-            
+
     return "".join(html_parts)
 
 def generate_clean_output(redacted_text):
     """
     Generates a clean, final output view with highlighted redaction tags.
     """
-
     redacted_text = _extract_redacted_text(redacted_text)
 
-    
     def highlight_tag(match):
         tag_content = match.group(0)
         escaped = html.escape(tag_content)
@@ -347,57 +341,77 @@ def generate_clean_output(redacted_text):
             f'font-size: 0.9em;">'
             f'{escaped}</span>'
         )
-    
+
     highlighted = re.sub(r'\[REDACTED[^\]]*\]', highlight_tag, html.escape(redacted_text))
     return highlighted
 
-def compute_system_config_hash() -> str:
-    """
-    Compute a hash of the current system configuration.
-    This prevents replay drift due to environment changes.
-    """
-    config_data = {
-        "engine_version": engine.PROMPT_VERSION,
-        "python_version": "3.11",
-        "streamlit_version": st.__version__,
-    }
-    config_str = json.dumps(config_data, sort_keys=True)
-    return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+# ── CHANGE 5: Remove local compute_system_config_hash — now using the
+#    imported _compute_system_config_hash from audit/system_config.py
+# ──────────────────────────────────────────────────────────────────────────
 
 # --- SIDEBAR: SYSTEM CONFIG ---
 with st.sidebar:
     st.header("System Control")
-    
+
     st.subheader("Policy Context")
-    
+
     regulation_keys = list(REGULATION_INFO.keys())
     regulation_labels = [REGULATION_INFO[k]["name"] for k in regulation_keys]
-    
+
     selected_index = st.selectbox(
         "Regulatory Framework",
         range(len(regulation_keys)),
         format_func=lambda i: regulation_labels[i],
         help="Select the applicable data protection regulation"
     )
-    
+
     regulation = regulation_keys[selected_index]
     reg_info = REGULATION_INFO[regulation]
-    
+
     st.caption(f"**{reg_info['full_name']}**")
     st.caption(reg_info['description'])
-    
+
     if regulation == "GDPR":
         country_code = st.text_input(
-            "EU Member State (ISO 3166-1)", 
+            "EU Member State (ISO 3166-1)",
             "DE",
             help="Enter the 2-letter country code (e.g., DE, FR, IT)"
         ).upper()
     else:
         country_code = reg_info["country"]
         st.caption(f"**Jurisdiction:** {country_code}")
-    
+
+    # ── CHANGE 2: Transfer context inputs ─────────────────────────────────
     st.divider()
-    
+    st.subheader("Transfer Context")
+
+    source_country = st.text_input(
+        "Source Country (ISO)", "US",
+        help="Country where data originates (e.g. US, DE, IN)"
+    ).upper().strip()
+
+    destination_country = st.text_input(
+        "Destination Country (ISO)", "US",
+        help="Country where data is being sent"
+    ).upper().strip()
+
+    data_subject_country = st.text_input(
+        "Patient Residency (ISO)", "US",
+        help="Country of the data subject's residence"
+    ).upper().strip()
+
+    purpose = st.selectbox(
+        "Purpose of Transfer",
+        options=["", "Treatment", "Research", "Billing", "Operations"],
+        help="Declared purpose — affects strictness of evaluation"
+    )
+
+    if purpose:
+        st.session_state.declared_purpose = purpose
+    # ──────────────────────────────────────────────────────────────────────
+
+    st.divider()
+
     st.subheader("Engine Intelligence")
     if engine.client:
         st.caption("Hybrid Mode Active – AI Redactor + Deterministic Fallback")
@@ -405,24 +419,24 @@ with st.sidebar:
         st.caption("Fallback Mode Active – Deterministic Pattern Matching Only")
 
     st.divider()
-    
+
     if "judge_mode" not in st.session_state:
         st.session_state.judge_mode = True
-    
+
     st.session_state.judge_mode = st.checkbox(
         "Judge / Demo Mode",
         value=st.session_state.judge_mode,
         help="Demo mode: Source input hidden by default, evidence fully visible"
     )
-    
+
     st.divider()
     st.caption(f"VeriFHIR Core {engine.PROMPT_VERSION}")
 
 # --- INPUT MODE MAPPING ---
 INPUT_MODES = {
     "Text / JSON": "TEXT",
-    "HL7 v2": "HL7",
-    "Image / Document (OCR)": "DOCUMENT_OCR",
+    "HL7 v2 Message": "HL7",
+    "Scanned Document (OCR)": "DOCUMENT_OCR",
 }
 
 # --- INITIALIZE SESSION STATE (FIXED) ---
@@ -450,11 +464,15 @@ if "selected_demo_case" not in st.session_state:
 if "last_regulation" not in st.session_state:
     st.session_state.last_regulation = regulation
 
-# FIXED: Reset demo selection if regulation changes
+# ── CHANGE 3: Fix stale demo case — clear text + result on regulation change
 if st.session_state.last_regulation != regulation:
     st.session_state.selected_data_type = ""
     st.session_state.selected_demo_case = None
+    st.session_state.last_input_text = ""
+    st.session_state.current_result = None
+    st.session_state.input_provenance = None
     st.session_state.last_regulation = regulation
+# ──────────────────────────────────────────────────────────────────────────
 
 # --- MAIN WORKSPACE ---
 st.title("VeriFHIR Governance Console")
@@ -463,9 +481,8 @@ st.markdown("#### Clinical Record Remediation & Audit Workspace")
 st.markdown(
     f"""
     <div style='background: rgba(15, 23, 42, 0.9); border-left: 3px solid #0284c7; padding: 15px; border-radius: 5px; font-size: 0.875rem; color: #94a3b8;'>
-    <strong>COMPLIANCE NOTICE:</strong> Operating under <strong>{reg_info['name']}</strong> regulations. 
-    Suggested redaction (requires human approval) generated by Azure OpenAI (GPT-4o). 
-    All remediation suggestions require final human attestation before system commit.
+    <strong>COMPLIANCE NOTICE:</strong> Operating under <strong>{reg_info['name']}</strong> regulations.
+    Governance decisions are produced by a deterministic rules engine. All remediation suggestions require final human attestation before system commit.
     </div>
     <br>
     """,
@@ -478,15 +495,15 @@ tab1, tab2 = st.tabs(["Review & Decision", "Governance Evidence"])
 with tab1:
     # MODIFIED: New two-level dropdown system replacing old demo case dropdown
     st.markdown("### Load Example Case")
-    
+
     # Level 1: Data Type Dropdown
     data_type_options = ["", "text/json", "hl7", "docs"]
-    
+
     # FIXED: Preserve selection across reruns
     current_data_type_idx = 0
     if st.session_state.selected_data_type in data_type_options:
         current_data_type_idx = data_type_options.index(st.session_state.selected_data_type)
-    
+
     selected_data_type = st.selectbox(
         "Select Data Type",
         options=data_type_options,
@@ -494,19 +511,19 @@ with tab1:
         help="Choose the type of clinical data to demonstrate",
         key="data_type_selector"
     )
-    
+
     # Update session state
     if selected_data_type != st.session_state.selected_data_type:
         st.session_state.selected_data_type = selected_data_type
         st.session_state.selected_demo_case = None  # Reset demo case when data type changes
-    
+
     # Level 2: Regulation-specific demo cases (dependent on Level 1)
     if selected_data_type and selected_data_type != "":
         demo_options = get_demo_options_by_type(selected_data_type, regulation)
-        
+
         if demo_options:
             demo_labels = ["-- Select Example --"] + [opt[0] for opt in demo_options]
-            
+
             # FIXED: Preserve selection with bounds checking
             current_demo_idx = 0
             if st.session_state.selected_demo_case:
@@ -518,7 +535,7 @@ with tab1:
                             break
                 except Exception:
                     current_demo_idx = 0
-            
+
             selected_demo_idx = st.selectbox(
                 f"Select {regulation} Example for {selected_data_type}",
                 options=range(len(demo_labels)),
@@ -527,29 +544,29 @@ with tab1:
                 help=f"Regulation-specific examples for {selected_data_type} data",
                 key="demo_case_selector"
             )
-            
+
             # Handle demo selection
             if selected_demo_idx > 0:
                 try:
                     display_name, case_key, reg_key = demo_options[selected_demo_idx - 1]
-                    
+
                     # Check if selection changed
                     current_selection = (reg_key, case_key)
                     if st.session_state.selected_demo_case != current_selection:
                         st.session_state.selected_demo_case = current_selection
-                        
+
                         # Load demo case
                         demo_text = extract_demo_text(reg_key, case_key)
-                        
+
                         if demo_text:  # FIXED: Only update if text extraction succeeded
                             demo_mode = get_input_mode_from_case(case_key)
-                            
+
                             # Update session state
                             st.session_state.input_mode = demo_mode
                             st.session_state.last_input_text = demo_text
                             st.session_state.current_result = None
                             st.session_state.input_provenance = None
-                            
+
                             # Handle OCR cases
                             if demo_mode == "DOCUMENT_OCR":
                                 st.session_state.ocr_extracted_text = demo_text
@@ -564,21 +581,21 @@ with tab1:
                             # Reset input state when switching modes to avoid cross-mode leakage
                             st.session_state.input_mode = demo_mode
                             st.session_state.last_input_text = demo_text
-                            
+
                             st.rerun()
-                    
+
                     # Display metadata
                     st.caption(f"**Loaded:** {display_name} | **Mode:** {get_input_mode_from_case(case_key)}")
-                    
+
                 except IndexError as e:
                     st.error(f"Demo case selection error: Invalid index. Please reselect.")
                 except Exception as e:
                     st.error(f"Error loading demo case: {str(e)}")
         else:
             st.info(f"No {regulation} examples available for {selected_data_type}")
-    
+
     st.markdown("---")
-    
+
     # ========== PHASE 1 OR PHASE 2 LAYOUT ==========
     if st.session_state.current_result:
         # PHASE 2: VERTICAL FLOW (After Analysis)
@@ -589,36 +606,52 @@ with tab1:
         else:
             st.caption("Source Record (Read-Only)")
             st.text_area("Source Record (Read-Only)", value=st.session_state.get('last_input_text', ''), height=150, disabled=True)
-        
+
         st.markdown("---")
-        
+
         # 2. Redaction Review (PRIMARY, dominant) - full width only
         st.markdown("### Redaction Review")
         res = st.session_state.current_result
-        
+
         view_mode = st.radio(
             "Display Mode:",
             ["Redline (Changes)", "Clean Output"],
             horizontal=True,
             help="Toggle between diff view and final output"
         )
-        
+
         if view_mode == "Redline (Changes)":
             st.markdown("**Changes Detected:**")
-            diff_html = generate_diff_html(res['original_text'], _extract_redacted_text(res['suggested_redaction']))
-            
-            st.markdown(
-                f"""
-                <div class="redaction-review-container">
-                    {diff_html}
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            original = res['original_text']
+            redacted = _extract_redacted_text(res['suggested_redaction'])
+            if original == redacted:
+                st.info(
+                    "Compliance verdict produced by deterministic rules engine. "
+                    "AI redaction suggestions require Azure OpenAI credentials — "
+                    "see Engine Intelligence in the sidebar."
+                )
+                st.markdown(
+                    f"""
+                    <div class="redaction-review-container">
+                        {html.escape(original)}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                diff_html = generate_diff_html(original, redacted)
+                st.markdown(
+                    f"""
+                    <div class="redaction-review-container">
+                        {diff_html}
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
         else:
             st.markdown("**Final Redacted Output:**")
             clean_html = generate_clean_output(_extract_redacted_text(res['suggested_redaction']))
-            
+
             st.markdown(
                 f"""
                 <div class="redaction-review-container">
@@ -627,49 +660,58 @@ with tab1:
                 """,
                 unsafe_allow_html=True
             )
-        
+
         # Decision Summary Strip
         method = res.get('remediation_method', '')
         audit = res.get('audit_metadata', {})
         declared_purpose = st.session_state.get('declared_purpose', 'Not yet declared')
         rule_count = len(audit.get('rules_applied', [])) if audit.get('rules_applied') else 0
-        
+
+        # Show compliance verdict prominently
+        decision_status = audit.get('decision_status', '')
+        if decision_status == 'REJECTED':
+            st.error(f"⛔ REJECTED — Risk Score: {audit.get('max_risk_score', 0):.2f} | {audit.get('decision_reason', '')}")
+        elif decision_status == 'NEEDS_REVIEW':
+            st.warning(f"⚠️ NEEDS REVIEW — Risk Score: {audit.get('max_risk_score', 0):.2f} | {audit.get('decision_reason', '')}")
+        elif decision_status in ('APPROVED', 'APPROVED_WITH_WARNINGS'):
+            st.success(f"✅ {decision_status} — Risk Score: {audit.get('max_risk_score', 0):.2f}")
+
         st.markdown(f"""
         <div style='
-            padding: 12px 0; 
+            padding: 12px 0;
             border-top: 1px solid rgba(255,255,255,0.08);
             border-bottom: 1px solid rgba(255,255,255,0.08);
             font-size: 0.875rem;
             color: #94a3b8;'>
-            <strong>Engine:</strong> {method} &nbsp;&nbsp;|&nbsp;&nbsp; 
-            <strong>Regulation:</strong> {audit.get('regulation', '')} &nbsp;&nbsp;|&nbsp;&nbsp; 
-            <strong>Rules Applied:</strong> {rule_count} &nbsp;&nbsp;|&nbsp;&nbsp; 
+            <strong>Engine:</strong> {method} &nbsp;&nbsp;|&nbsp;&nbsp;
+            <strong>Regulation:</strong> {audit.get('regulation', '')} &nbsp;&nbsp;|&nbsp;&nbsp;
+            <strong>Violations:</strong> {rule_count} &nbsp;&nbsp;|&nbsp;&nbsp;
             <strong>Purpose:</strong> {declared_purpose if declared_purpose != 'Not yet declared' else '(not set)'}
         </div>
         """, unsafe_allow_html=True)
-        
+
         st.divider()
-        
+
         # 3. Post-Redaction Two-Column Split (Decision | Evidence)
         col_decision, col_evidence = st.columns(2, gap="large")
-        
+
         with col_decision:
             st.markdown("#### Decision & Accountability")
-            
+
             st.markdown(f"""
-**Engine**  
+**Engine**
 {method}
 
-**Regulation**  
+**Regulation**
 {audit.get('regulation', 'N/A')}
 
-**Declared Purpose**  
+**Declared Purpose**
 {declared_purpose if declared_purpose != 'Not yet declared' else 'Not yet declared'}
 """)
-            
+
             st.divider()
             st.markdown("#### Human Attestation")
-            
+
             with st.form(key="human_decision_form", clear_on_submit=True):
                 purpose_options = ["", "Treatment", "Billing", "Research", "Operations"]
                 current_purpose_index = 0
@@ -678,32 +720,32 @@ with tab1:
                         current_purpose_index = purpose_options.index(st.session_state.declared_purpose)
                     except ValueError:
                         current_purpose_index = 0
-                
-                purpose = st.selectbox(
+
+                purpose_form = st.selectbox(
                     "Purpose *",
                     options=purpose_options,
                     index=current_purpose_index,
                     help="Select the declared purpose for this data processing.",
                 )
-                
-                if purpose and purpose != "":
-                    st.session_state.declared_purpose = purpose
-                
+
+                if purpose_form and purpose_form != "":
+                    st.session_state.declared_purpose = purpose_form
+
                 reviewer_id = st.text_input(
                     "Reviewer Identity *",
                     value="MVP-SYSTEM-USER",
                     placeholder="email@example.com or reviewer_id",
                     help="Your email or reviewer ID.",
                 )
-                
+
                 st.markdown("**Decision ***")
-                decision = st.radio(
+                decision_form = st.radio(
                     "Select your decision:",
                     options=["APPROVED", "NEEDS_REVIEW", "REJECTED"],
                     index=0,
                     help="Your decision on this redaction.",
                 )
-                
+
                 rationale = st.text_area(
                     "Rationale (minimum 20 characters) *",
                     value="Automated approval for MVP testing.",
@@ -711,34 +753,34 @@ with tab1:
                     help="Provide a justification for your decision (minimum 20 characters).",
                     height=100,
                 )
-                
+
                 confirmation = st.checkbox(
                     "I acknowledge this decision is final and auditable.",
                     value=False,
                     help="Acknowledgment for audit trail."
                 )
-                
+
                 submitted = st.form_submit_button("Submit Decision", type="primary", use_container_width=True)
-            
+
             # Process form submission
             if submitted:
                 validation_errors = []
-                
-                if not purpose or purpose.strip() == "":
+
+                if not purpose_form or purpose_form.strip() == "":
                     validation_errors.append("Purpose selection is required")
-                
+
                 if not reviewer_id or not reviewer_id.strip():
                     validation_errors.append("Reviewer identity is required")
-                
-                if decision is None:
+
+                if decision_form is None:
                     validation_errors.append("Decision selection is required")
-                
+
                 if not rationale or len(rationale.strip()) < 20:
                     validation_errors.append("Rationale must be at least 20 characters")
-                
+
                 if not confirmation:
                     validation_errors.append("Confirmation acknowledgment is required")
-                
+
                 if validation_errors:
                     st.error("**Validation Failed:**\n" + "\n".join(f"• {err}" for err in validation_errors))
                 else:
@@ -746,32 +788,37 @@ with tab1:
                         from verifhir.models.audit_record import HumanDecision
                         from verifhir.orchestrator.audit_builder import build_audit_record
                         import uuid
-                        
+
                         human_decision = HumanDecision(
                             reviewer_id=reviewer_id.strip(),
-                            decision=decision,
+                            decision=decision_form,
                             rationale=rationale.strip(),
                             timestamp=datetime.datetime.utcnow()
                         )
-                        
+
                         # FIXED: Proper None check for input_provenance
                         if st.session_state.input_provenance is None:
                             st.error("Input provenance not found. Please re-analyze the input.")
                             st.stop()
-                        
-                        audit_purpose = st.session_state.declared_purpose if st.session_state.declared_purpose != "Not yet declared" else purpose.strip()
+
+                        audit_purpose = st.session_state.declared_purpose if st.session_state.declared_purpose != "Not yet declared" else purpose_form.strip()
                         audit_record = build_audit_record(
                             audit_id=str(uuid.uuid4()),
                             dataset_fingerprint=audit.get('dataset_fingerprint', 'UNKNOWN'),
                             engine_version=engine.PROMPT_VERSION,
                             policy_snapshot_version=audit.get('policy_snapshot_version', '1.0'),
-                            jurisdiction_context={
+                            jurisdiction_context=audit.get('jurisdiction', {
                                 "regulation": regulation,
                                 "country_code": country_code
+                            }),
+                            source_jurisdiction=audit.get('jurisdiction', {}).get('source', country_code),
+                            destination_jurisdiction=audit.get('jurisdiction', {}).get('destination', country_code),
+                            decision={
+                                "action": "REDACT",
+                                "approved": (decision_form == "APPROVED"),
+                                "status": audit.get('decision_status', decision_form),
+                                "max_risk_score": audit.get('max_risk_score', 0.0),
                             },
-                            source_jurisdiction=country_code,
-                            destination_jurisdiction=country_code,
-                            decision={"action": "REDACT", "approved": (decision == "APPROVED")},
                             detections=audit.get('rules_applied', []),
                             detection_methods_used=[method],
                             negative_assertions=audit.get('negative_assertions', []),
@@ -780,35 +827,35 @@ with tab1:
                             input_provenance=st.session_state.input_provenance,
                             previous_record_hash=None
                         )
-                        
-                        if decision == "APPROVED":
+
+                        if decision_form == "APPROVED":
                             file_id = commit_record(
                                 original_text=res['original_text'],
                                 redacted_text=res['suggested_redaction'],
                                 metadata=res.get('audit_metadata', {})
                             )
-                            
+
                             st.success("Record committed to secure vault.")
                             st.caption(f"Reference ID: {file_id}")
                             st.caption(f"Reviewer: {reviewer_id}")
-                            st.caption(f"Purpose: {purpose.strip()}")
-                            st.caption(f"Decision: {decision} at {human_decision.timestamp.isoformat()}")
-                            
+                            st.caption(f"Purpose: {purpose_form.strip()}")
+                            st.caption(f"Decision: {decision_form} at {human_decision.timestamp.isoformat()}")
+
                             time.sleep(2)
                             st.rerun()
-                            
-                        elif decision == "NEEDS_REVIEW":
+
+                        elif decision_form == "NEEDS_REVIEW":
                             st.warning(f"Flagged for manual remediation queue by {reviewer_id}")
                             st.caption(f"Timestamp: {human_decision.timestamp.isoformat()}")
                             time.sleep(2)
                             st.rerun()
-                            
-                        elif decision == "REJECTED":
+
+                        elif decision_form == "REJECTED":
                             st.error(f"Redaction rejected by {reviewer_id}")
                             st.caption(f"Timestamp: {human_decision.timestamp.isoformat()}")
                             time.sleep(2)
                             st.rerun()
-                        
+
                     except ValueError as ve:
                         from verifhir.telemetry import scrub_exception_for_telemetry, emit_exception_telemetry
                         error_name = scrub_exception_for_telemetry(ve)
@@ -821,21 +868,29 @@ with tab1:
                         st.error(f"Operation Failed: {error_name}")
                         import traceback
                         st.code(traceback.format_exc())
-        
+
         with col_evidence:
             st.markdown("#### Supporting Evidence")
-            
-            # Explainability Summary (3-4 bullets)
-            st.markdown("**Decision Recap**")
-            signals_text = ', '.join([m for m in ([res.get('remediation_method')] if res.get('remediation_method') else [])]) or 'Deterministic rules + ML advisory'
-            findings_text = ', '.join(sorted(set([f for f in re.findall(r'\b[A-Z][a-z]+ identifiers?\b', res.get('audit_metadata', {}).get('summary', '') or '')]))) or 'Names, dates, identifiers (where applicable)'
-            st.markdown(f"""
-- Signals: {signals_text}
-- Key findings: {findings_text}
-- Rationale: {audit.get('decision_rationale', 'Rule-based remediation with advisory ML suggestions')}
-""")
-            
-            # Negative Assurance Summary (3-4 bullets)
+
+            # Violations from rules engine
+            violations_list = audit.get('violations', [])
+            if violations_list:
+                st.markdown("**Violations Detected**")
+                for v in violations_list:
+                    severity = v.get('severity', 'UNKNOWN')
+                    color = "#f87171" if severity == "CRITICAL" else "#fbbf24" if severity == "MAJOR" else "#94a3b8"
+                    st.markdown(
+                        f"<div style='border-left: 3px solid {color}; padding: 4px 8px; margin: 4px 0; font-size: 0.85rem;'>"
+                        f"<strong>{safe_text(v.get('violation_type', ''))}</strong> — "
+                        f"{safe_text(v.get('regulation', ''))} | {safe_text(v.get('field_path', ''))} | "
+                        f"Confidence: {v.get('confidence') or 'N/A'}"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.markdown("**No violations detected**")
+
+            # Negative Assurance Summary
             st.markdown("**Negative Assurance (summary)**")
             negs = audit.get('negative_assertions', [])
             if negs:
@@ -844,26 +899,25 @@ with tab1:
                     st.markdown(f"- {cat}: NOT DETECTED")
             else:
                 st.markdown("- No negative assertions available")
-            
+
             # Short forensic identifiers list
             canonical_fingerprint = hashlib.sha256(res['original_text'].encode()).hexdigest()[:32]
-            # FIXED: Safe attribute access with proper None check
             system_config_hash_val = "UNKNOWN"
             if st.session_state.input_provenance is not None and hasattr(st.session_state.input_provenance, 'system_config_hash'):
                 system_config_hash_val = st.session_state.input_provenance.system_config_hash
-            
+
             st.markdown("**Forensic IDs (concise)**")
             st.markdown(f"- Input fingerprint: `{canonical_fingerprint}`")
             st.markdown(f"- System config hash: `{system_config_hash_val}`")
             st.markdown(f"- Engine: `{engine.PROMPT_VERSION}`")
-    
+
     else:
         # PHASE 1: SIDE-BY-SIDE (Before Analysis)
         col_input, col_output = st.columns([1, 1], gap="large")
-        
+
         with col_input:
             st.subheader("Source Input")
-            
+
             current_mode_label = next(
                 (label for label, mode in INPUT_MODES.items()
                 if mode == st.session_state.input_mode),
@@ -879,14 +933,14 @@ with tab1:
             st.session_state.input_mode = INPUT_MODES[input_type_selector]
 
             input_text = ""
-            
+
             if st.session_state.input_mode == "DOCUMENT_OCR":
                 uploaded_file = st.file_uploader(
                     "Upload Image or Document",
                     type=["png", "jpg", "jpeg", "pdf"],
                     help="Upload an image or PDF. OCR will extract text for compliance evaluation."
                 )
-                
+
                 if uploaded_file:
                     if uploaded_file.type == "application/pdf":
                         st.session_state.uploaded_image = None
@@ -896,25 +950,25 @@ with tab1:
                     try:
                         from verifhir.adapters.ocr_adapter import extract_text_from_image, OCRQualityError
                         from verifhir.telemetry import emit_ocr_confidence_bucket, scrub_exception_for_telemetry
-                        
+
                         with st.status("Extracting text from image...", expanded=True) as ocr_status:
                             if uploaded_file.type == "application/pdf":
                                 raise OCRQualityError("PDF input requires document OCR pipeline")
                             ocr_result = extract_text_from_image(uploaded_file)
                             st.session_state.ocr_extracted_text = ocr_result["text"]
                             st.session_state.ocr_confidence = ocr_result["confidence"]
-                            
+
                             if ocr_result["confidence"] >= 0.9:
                                 emit_ocr_confidence_bucket("0.9+")
                             elif ocr_result["confidence"] >= 0.8:
                                 emit_ocr_confidence_bucket("0.8-0.9")
                             else:
                                 emit_ocr_confidence_bucket("0.7-0.8")
-                            
+
                             input_text = ocr_result["text"]
                             st.session_state.last_input_text = input_text
                             ocr_status.update(label="Complete - Text extracted", state="complete", expanded=False)
-                            
+
                     except OCRQualityError as e:
                         from verifhir.telemetry import emit_exception_telemetry
                         emit_exception_telemetry(e)
@@ -926,10 +980,10 @@ with tab1:
                         emit_exception_telemetry(e)
                         st.error(f"OCR extraction failed: {error_name}")
                         st.stop()
-                
+
                 if not uploaded_file:
                     st.session_state.uploaded_image = None
-                
+
                 if st.session_state.ocr_extracted_text:
                     if st.session_state.uploaded_image is not None:
                         col_img, col_text = st.columns(2)
@@ -950,19 +1004,27 @@ with tab1:
                             disabled=True
                         )
                     input_text = st.session_state.ocr_extracted_text
-                    
+
             elif st.session_state.input_mode == "HL7":
-                default_hl7 = st.session_state.last_input_text if st.session_state.last_input_text else "MSH|^~\\&|SendingApp|SendingFacility|ReceivingApp|ReceivingFacility|20240115120000||ADT^A01|12345|P|2.5\nPID|1||123456^^^MRN||DOE^JOHN^MIDDLE||19800115|M|||123 MAIN ST^^CITY^ST^12345||555-1234|||"
-                input_text = st.text_area(
-                    "HL7 v2 Message",
-                    height=400,
-                    value=default_hl7,
-                    help="Paste HL7 v2 message here. Will be converted to FHIR before processing."
+                # ── Graceful HL7 fail (no crash, no traceback) ─────────────────
+                st.error(
+                    "HL7 v2 input is not supported in this version. "
+                    "Please use Text / JSON mode and paste a FHIR JSON record instead."
                 )
-                st.session_state.last_input_text = input_text
-                
+                st.info("HL7 → FHIR conversion is delegated to Microsoft FHIR Converter and is not yet integrated for MVP.")
+                st.stop()
+
             else:
                 # TEXT mode
+
+                uploaded_json = st.file_uploader(
+                    "Upload FHIR JSON file",
+                    type=["json"],
+                    help="Upload a FHIR JSON or Bundle file"
+                )
+                if uploaded_json:
+                    st.session_state.last_input_text = uploaded_json.read().decode("utf-8")
+
                 default_text = st.session_state.last_input_text if st.session_state.last_input_text else json.dumps({
                     "resourceType": "Patient",
                     "id": "example",
@@ -977,27 +1039,30 @@ with tab1:
                     help="Paste plain text or FHIR JSON resource here."
                 )
                 st.session_state.last_input_text = input_text
-            
+
             analyze_btn = st.button("Analyze & Redact", type="primary", use_container_width=True)
-        
+
         with col_output:
             st.subheader("Analysis Output")
             st.info("Submit source input to generate redaction proposal.")
-        
+
         # --- ENGINE EXECUTION ---
         if analyze_btn and input_text:
+            if not purpose:
+                st.warning("Please declare a purpose of transfer before analyzing.")
+                st.stop()
             if not input_text.strip():
                 st.error("Input required for analysis.")
             else:
                 with st.status("Applying governance protocols...", expanded=True) as status:
                     st.write(f"Applying {reg_info['name']} regulations...")
-                    st.write(f"Jurisdiction: {country_code}")
-                    
+                    st.write(f"Jurisdiction: source={source_country} → dest={destination_country} | subject={data_subject_country}")
+
                     try:
                         from verifhir.telemetry import emit_converter_status, scrub_exception_for_telemetry
-                        
+
                         if st.session_state.input_mode == "DOCUMENT_OCR":
-                            system_config_hash = compute_system_config_hash()
+                            system_config_hash = _compute_system_config_hash()
                             st.session_state.input_provenance = InputProvenance(
                                 original_format="IMAGE",
                                 system_config_hash=system_config_hash,
@@ -1007,35 +1072,14 @@ with tab1:
                                 ocr_confidence=st.session_state.ocr_confidence,
                             )
                             processed_text = st.session_state.ocr_extracted_text
+                            fhir_resource = {
+                                "resourceType": "DocumentReference",
+                                "text": {"div": processed_text}
+                            }
                             emit_converter_status("success")
-                            
-                        elif st.session_state.input_mode == "HL7":
-                            raw_payload = input_text
-                            normalized = normalize_input(
-                                payload=raw_payload,
-                                input_format="HL7v2",
-                            )
-                            fhir_bundle = normalized["bundle"]
-                            input_metadata = normalized["metadata"]
-                            
-                            system_config_hash = compute_system_config_hash()
-                            st.session_state.input_provenance = InputProvenance(
-                                original_format=input_metadata.get('original_format', 'HL7v2'),
-                                system_config_hash=system_config_hash,
-                                converter_version=input_metadata.get('converter_version'),
-                                message_type=input_metadata.get('message_type'),
-                                ocr_engine_version=None,
-                                ocr_confidence=None,
-                            )
-                            emit_converter_status("success")
-                            
-                            if isinstance(fhir_bundle, dict):
-                                processed_text = json.dumps(fhir_bundle, indent=2)
-                            else:
-                                processed_text = str(fhir_bundle)
-                            
+
                         else:
-                            # TEXT mode
+                            # TEXT mode — try to parse as FHIR JSON, else treat as plain text
                             try:
                                 raw_payload = json.loads(input_text)
                                 normalized = normalize_input(
@@ -1044,8 +1088,8 @@ with tab1:
                                 )
                                 fhir_bundle = normalized["bundle"]
                                 input_metadata = normalized["metadata"]
-                                
-                                system_config_hash = compute_system_config_hash()
+
+                                system_config_hash = _compute_system_config_hash()
                                 st.session_state.input_provenance = InputProvenance(
                                     original_format=input_metadata.get('original_format', 'FHIR'),
                                     system_config_hash=system_config_hash,
@@ -1055,13 +1099,14 @@ with tab1:
                                     ocr_confidence=None,
                                 )
                                 emit_converter_status("success")
-                                
-                                if isinstance(fhir_bundle, dict):
-                                    processed_text = json.dumps(fhir_bundle, indent=2)
-                                else:
-                                    processed_text = str(fhir_bundle)
+
+                                fhir_resource = fhir_bundle  # dict for rules engine
+                                display_text = json.dumps(fhir_bundle, indent=2) if isinstance(fhir_bundle, dict) else str(fhir_bundle)
+                                processed_text = display_text  # for display only
+
+
                             except json.JSONDecodeError:
-                                system_config_hash = compute_system_config_hash()
+                                system_config_hash = _compute_system_config_hash()
                                 st.session_state.input_provenance = InputProvenance(
                                     original_format="TEXT",
                                     system_config_hash=system_config_hash,
@@ -1070,91 +1115,147 @@ with tab1:
                                     ocr_engine_version=None,
                                     ocr_confidence=None,
                                 )
-                                processed_text = st.session_state.ocr_extracted_text or input_text
+                                processed_text = input_text
+                                fhir_resource = {
+                                    "resourceType": "DocumentReference",
+                                    "text": {"div": input_text}
+                                }
                                 emit_converter_status("success")
-                        
-                        st.write(f"Complete - Input normalized: {st.session_state.input_provenance.original_format}")
-                        if st.session_state.input_provenance.message_type:
-                            st.write(f"  Message type: {st.session_state.input_provenance.message_type}")
-                        if st.session_state.input_provenance.ocr_engine_version:
-                            st.write(f"  OCR confidence: {st.session_state.input_provenance.ocr_confidence:.2f}")
-                        
-                    except NotImplementedError as e:
-                        from verifhir.telemetry import scrub_exception_for_telemetry, emit_exception_telemetry, emit_converter_status
-                        error_name = scrub_exception_for_telemetry(e)
-                        emit_exception_telemetry(e)
-                        emit_converter_status("failure")
-                        st.error(f"HL7 conversion not yet implemented: {error_name}")
-                        st.info("For MVP, HL7 → FHIR conversion is delegated to Microsoft FHIR Converter.")
-                        st.stop()
+
+                        st.write(f"Complete — Input normalised: {st.session_state.input_provenance.original_format}")
+
                     except Exception as e:
                         from verifhir.telemetry import scrub_exception_for_telemetry, emit_exception_telemetry, emit_converter_status
                         error_name = scrub_exception_for_telemetry(e)
                         emit_exception_telemetry(e)
                         emit_converter_status("failure")
-                        st.error(f"Input normalization failed: {error_name}")
+                        st.error(f"Input normalisation failed: {error_name}")
                         st.stop()
-                    
+
+                    # ── CHANGE 4: Replace engine.generate_suggestion with governance pipeline ──
                     from opentelemetry import trace
-                    from verifhir.telemetry import emit_decision_telemetry
-                    
+                    from verifhir.telemetry import emit_decision_telemetry, emit_risk_band
+
                     tracer = trace.get_tracer(__name__)
-                    
+
                     with tracer.start_as_current_span("verifhir.decision_evaluation"):
                         start_time = time.perf_counter()
-                        response = engine.generate_suggestion(processed_text, regulation, country_code)
+
+                        # 1. Resolve jurisdiction from sidebar inputs
+                        jurisdiction = resolve_jurisdiction(
+                            source_country=source_country,
+                            destination_country=destination_country,
+                            data_subject_country=data_subject_country,
+                        )
+
+                        st.write(
+                            f"Jurisdiction resolved: {jurisdiction.applicable_regulations} → "
+                            f"governing: {jurisdiction.governing_regulation or 'None'}"
+                        )
+
+                        # 2. Build a lightweight policy adapter
+                        class _PolicyAdapter:
+                            def __init__(self, jur, reg_fallback):
+                                self.governing_regulation = jur.governing_regulation or reg_fallback
+                                self.regulation_citation = jur.regulation_citation
+                                self.applicable_regulations = jur.applicable_regulations
+
+                                class _Ctx:
+                                    pass
+                                ctx = _Ctx()
+                                ctx.data_subject_country = data_subject_country
+                                ctx.applicable_regulations = jur.applicable_regulations
+                                self.context = ctx
+
+                        adapted_policy = _PolicyAdapter(jurisdiction, regulation)
+
+                        # 3. fhir_resource already set above — use it directly
+                        if not isinstance(fhir_resource, dict):
+                            fhir_resource = {
+                                "resourceType": "DocumentReference",
+                                "text": {"div": processed_text}
+                            }
+
+                        # 4. Run deterministic rules engine
+                        raw_violations = run_deterministic_rules(adapted_policy, fhir_resource)
+
+                        # 5. Judge
+                        judge = DecisionEngine()
+                        decision = judge.decide(raw_violations)
+
+                        # 6. Explain
+                        explained = explain_violations(raw_violations, fhir_resource)
+
+                        # 7. Negative assertions
+                        detection_methods = list({v.detection_method for v in raw_violations}) or ["DeterministicRule"]
+                        neg_assertions = generate_negative_assertions(explained, detection_methods)
+
                         latency_ms = int((time.perf_counter() - start_time) * 1000)
-                        
-                        remediation_method = response.get('remediation_method', 'Unknown')
-                        if 'Azure OpenAI' in remediation_method or 'OpenAI' in remediation_method:
-                            decision_path = "ml-sensor"
-                        elif 'Fallback' in remediation_method or 'Regex' in remediation_method:
-                            decision_path = "rules"
-                        else:
-                            decision_path = "hybrid"
-                        
-                        fallback_triggered = 'Fallback' in remediation_method or 'Regex' in remediation_method
-                        risk_score = response.get('risk_score', 0.0)
-                        if not isinstance(risk_score, float):
-                            risk_score = float(risk_score) if risk_score else 0.0
-                        
+
+                        # 8. Build response dict (same shape as before — display code unchanged)
+                        # Attempt AI redaction via engine; fall back to processed_text if client unavailable
+                        try:
+                            suggestion = engine.generate_suggestion(processed_text, regulation=jurisdiction.governing_regulation or regulation, country=data_subject_country)
+                            suggested_redaction = _extract_redacted_text(suggestion) or processed_text
+                        except Exception:
+                            suggested_redaction = processed_text
+
+                        response = {
+                            "original_text": processed_text,
+                            "suggested_redaction": suggested_redaction,
+                            "remediation_method": "Deterministic Rules Engine" if suggested_redaction == processed_text else "Hybrid (Rules + AI)",
+                            "is_authoritative": True,
+                            "audit_metadata": {
+                                "purpose": purpose
+                                "regulation": jurisdiction.governing_regulation or regulation,
+                                "country_code": data_subject_country,
+                                "rules_applied": [v.violation_type for v in raw_violations],
+                                "rule_count": len(raw_violations),
+                                "decision_status": decision.status,
+                                "max_risk_score": decision.max_risk_score,
+                                "decision_reason": decision.reason,
+                                "jurisdiction": {
+                                    "source": source_country,
+                                    "destination": destination_country,
+                                    "subject": data_subject_country,
+                                    "applicable": jurisdiction.applicable_regulations,
+                                    "governing": jurisdiction.governing_regulation,
+                                },
+                                "violations": [v.to_dict() for v in explained],
+                                "negative_assertions": [
+                                    {
+                                        "category": n.category,
+                                        "status": n.status,
+                                        "supported_by": n.supported_by,
+                                    }
+                                    for n in neg_assertions
+                                ],
+                                "policy_snapshot_version": "HIPAA-GDPR-DPDP-2025.1",
+                                "dataset_fingerprint": hashlib.sha256(
+                                    processed_text.encode()
+                                ).hexdigest()[:32],
+                            }
+                        }
+
+                        # Telemetry
                         emit_decision_telemetry(
                             decision_latency_ms=latency_ms,
-                            risk_score=risk_score,
-                            decision_path=decision_path,
-                            fallback_triggered=fallback_triggered,
+                            risk_score=float(decision.max_risk_score),
+                            decision_path="rules",
+                            fallback_triggered=False,
                         )
-                        
-                        from verifhir.telemetry import emit_risk_band
-                        if risk_score <= 3.0:
+                        risk_val = decision.max_risk_score
+                        if risk_val <= 3.0:
                             emit_risk_band("LOW")
-                        elif risk_score <= 8.0:
+                        elif risk_val <= 8.0:
                             emit_risk_band("MEDIUM")
                         else:
                             emit_risk_band("HIGH")
-                    
-                    if 'audit_metadata' not in response:
-                        response['audit_metadata'] = {}
-                    
-                    response['audit_metadata']['regulation'] = regulation
-                    response['audit_metadata']['country_code'] = country_code
-                    
-                    from verifhir.assurance.categories import ASSURABLE_CATEGORIES
-                    detection_methods_used = [response.get('remediation_method', 'Unknown')]
-                    
-                    negative_assertions_dict = []
-                    for category in ASSURABLE_CATEGORIES.keys():
-                        negative_assertions_dict.append({
-                            "category": category,
-                            "status": "NOT_DETECTED",
-                            "supported_by": ", ".join(sorted(detection_methods_used)),
-                            "scope_note": "Not detected within detector coverage"
-                        })
-                    
-                    response['audit_metadata']['negative_assertions'] = negative_assertions_dict
+                    # ── END CHANGE 4 ───────────────────────────────────────────────────
+
                     st.session_state.current_result = response
-                    
-                    status.update(label="Complete - Redaction Complete", state="complete", expanded=False)
+
+                    status.update(label="Complete — Governance analysis done", state="complete", expanded=False)
                     st.rerun()
 
 with tab2:
@@ -1169,15 +1270,16 @@ with tab2:
     else:
         res = st.session_state.current_result
         audit = res.get("audit_metadata", {})
-        
+
         # --- ROW 1: EXPLAINABILITY & NEGATIVE ASSURANCE ---
         col_left, col_right = st.columns(2, gap="large")
 
         with col_left:
-            # Extract detected categories for the display
+            # Show actual violations from rules engine
+            violations_list = audit.get("violations", [])
             rules_applied = audit.get("rules_applied", [])
-            categories_str = ", ".join(set(rules_applied)) if rules_applied else "Names, Dates, Identifiers"
-            
+            categories_str = ", ".join(set(rules_applied)) if rules_applied else "None detected"
+
             explain_html = f"""
             <div class="evidence-widget">
                 <div class="evidence-header">Explainability</div>
@@ -1185,22 +1287,27 @@ with tab2:
                 <div class="sub-widget">
                     <strong>Detection Signals Used</strong>
                     <div style="margin-top:0.5rem;">
-                        • Azure OpenAI (Advisory): Language-model suggestions<br/>
-                        • Deterministic Rules: Regulatory compliance authority<br/>
-                        • Regex & Identifier Validation: Pattern-based validators
+                        • Deterministic Rules Engine (authoritative)<br/>
+                        • Presidio + spaCy (advisory, local)
                     </div>
                 </div>
                 <div class="sub-widget">
-                    <strong>Observed Findings</strong>
+                    <strong>Violation Types Detected</strong>
                     <div style="margin-top:0.5rem;">
-                        • Key detected classes: {safe_text(categories_str)}
+                        • {safe_text(categories_str)}
+                    </div>
+                </div>
+                <div class="sub-widget">
+                    <strong>Governing Regulation</strong>
+                    <div style="margin-top:0.5rem;">
+                        • {safe_text(audit.get('regulation', 'N/A'))}<br/>
+                        • Applicable: {safe_text(str(audit.get('jurisdiction', {}).get('applicable', [])))}
                     </div>
                 </div>
                 <div class="sub-widget">
                     <strong>Decision Rationale</strong>
                     <div style="margin-top:0.5rem;">
-                        • Deterministic rules determine compliance; ML provides advisory suggestions.<br/>
-                        • Final decision requires human attestation.
+                        • {safe_text(audit.get('decision_reason', 'No violations detected.'))}
                     </div>
                 </div>
             </div>
@@ -1208,7 +1315,6 @@ with tab2:
             st.markdown(explain_html, unsafe_allow_html=True)
 
         with col_right:
-            # Check for financial status specifically as per app logic
             negative_assertions = audit.get("negative_assertions", [])
             financial_status = "DETECTED" if any("financial" in str(n).lower() for n in negative_assertions) else "NOT DETECTED"
 
@@ -1243,12 +1349,11 @@ with tab2:
 
         # --- ROW 2: FORENSIC EVIDENCE (FULL WIDTH) ---
         canonical_fingerprint = hashlib.sha256(res["original_text"].encode()).hexdigest()[:32]
-        
-        # FIXED: Safe attribute access with proper None check
+
         system_hash = "UNKNOWN"
         original_format = "N/A"
         ocr_conf = "N/A"
-        
+
         if st.session_state.input_provenance is not None:
             if hasattr(st.session_state.input_provenance, 'system_config_hash'):
                 system_hash = st.session_state.input_provenance.system_config_hash
@@ -1256,12 +1361,19 @@ with tab2:
                 original_format = st.session_state.input_provenance.original_format
             if hasattr(st.session_state.input_provenance, 'ocr_confidence') and st.session_state.input_provenance.ocr_confidence:
                 ocr_conf = f"{st.session_state.input_provenance.ocr_confidence:.2f}"
-        
+
+        jur = audit.get("jurisdiction", {})
         forensic_html = f"""
         <div class="evidence-widget">
             <div class="evidence-header">Forensic Evidence</div>
             <div class="evidence-divider"></div>
             <div style="font-size:0.95rem; color:#cbd5e1; font-family: monospace;">
+                <strong>Jurisdiction Context</strong><br/>
+                Source: {safe_text(jur.get('source', 'N/A'))} → Destination: {safe_text(jur.get('destination', 'N/A'))}<br/>
+                Patient Residency: {safe_text(jur.get('subject', 'N/A'))}<br/>
+                Applicable Frameworks: {safe_text(str(jur.get('applicable', [])))}<br/>
+                Governing Regulation: {safe_text(jur.get('governing', 'N/A'))}<br/>
+                <em style="color:#64748b;">Final legality depends on contractual safeguards not evaluated here.</em><br/><br/>
                 <strong>Audit Metadata</strong><br/>
                 Governance Engine: {safe_text(engine.PROMPT_VERSION)}<br/>
                 Policy Snapshot: {safe_text(audit.get("policy_snapshot_version", "1.0"))}<br/><br/>
