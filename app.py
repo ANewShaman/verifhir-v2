@@ -1,1 +1,1 @@
-from verifhir.dashboard.app import app
+import verifhir.dashboard.app

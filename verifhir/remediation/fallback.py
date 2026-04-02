@@ -209,6 +209,10 @@ class RegexFallbackEngine:
                 r"(?i)(?:MRN|medical record number|record number|patient id|patient number)[\s:#]+([A-Z0-9\-]{6,})",
                 re.MULTILINE
             ),
+            # Loose standalone MRN / numeric ID detection — defined here directly
+            # so _PATTERN_ORDER references never silently skip them if overlay fails
+            "MRN_UNSTRUCTURED": re.compile(r"\b\d{7,10}\b"),
+            "GENERIC_ID": re.compile(r"\b\d{7,10}\b"),
             "ACCOUNT_NUMBER": re.compile(
                 r"(?i)(?:account|acct|member|policy|certificate|license|licence)[\s#:]+([A-Z0-9\-]{6,})",
                 re.MULTILINE
@@ -265,6 +269,12 @@ class RegexFallbackEngine:
                 self._PATTERN_ORDER.insert(0, "BRAZIL_CPF")
         except Exception as e:
             logger.debug(f"Shared patterns unavailable: {e}")
+
+        for _key in self._PATTERN_ORDER:
+            if _key not in self._PATTERNS:
+                logger.warning(
+                    f"Pattern key '{_key}' in _PATTERN_ORDER has no definition in _PATTERNS"
+                )
 
     def _extract_encounter_anchor(self, text: str) -> Optional[datetime]:
         for key in ["DATE_DISCHARGE", "DATE_ADMISSION"]:
